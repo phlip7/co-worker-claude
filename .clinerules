@@ -17,6 +17,7 @@ Ingest source data from REST API and load into GCP bucket (bronze layer, medalli
 - Idempotent operations
 - Rerun, backfill, and late arriving data handling
 - Single table or all tables ingestion (parameter-driven)
+- Reference table handling (full snapshot for tables without change tracking)
 - Pagination handling
 - Schema validation
 - Error handling and logging
@@ -40,7 +41,7 @@ experiment/rest-api-ingestion/
 │       │   └── gcs_writer.py  # Write to GCS bucket
 │       ├── ingestion/
 │       │   ├── processor.py   # Transformations and business logic
-│       │   └── rules.py       # Ingestion rules (initial/incremental/backfill)
+│       │   └── rules.py       # Ingestion rules (initial/incremental/backfill/reference)
 │       ├── config/
 │       │   └── settings.py    # Configuration management
 │       └── utils/
@@ -57,7 +58,7 @@ experiment/rest-api-ingestion/
 ## Job Parameters
 The job accepts CLI arguments for flexible execution:
 - `--table`: Specific table name or "all" for all tables
-- `--mode`: initial, incremental, or backfill
+- `--mode`: initial, incremental, backfill, or reference
 - `--start-date`: Start date for data extraction (YYYY-MM-DD)
 - `--end-date`: End date for data extraction (YYYY-MM-DD)
 - `--config-path`: Path to config file (optional)
@@ -70,6 +71,7 @@ Example: `python main.py --table customers --mode incremental --start-date 2024-
 3. Load configuration
 4. Determine tables to process (single or all)
 5. For each table:
+   - Identify table type (transactional vs reference)
    - Fetch source data from API
    - Determine ingestion mode
    - Transform and validate data
@@ -80,5 +82,6 @@ Example: `python main.py --table customers --mode incremental --start-date 2024-
 - Medallion architecture (bronze layer focus)
 - Partition by ingestion date
 - Idempotency via unique identifiers and timestamps
-- Incremental logic based on watermarks/checkpoints
+- Incremental logic based on watermarks/checkpoints for transactional tables
+- Full snapshot approach for reference tables
 - Table metadata driven from configuration
