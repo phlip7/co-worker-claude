@@ -1,0 +1,127 @@
+# REST API Ingestion Configuration
+# This file defines the API source, GCS destination, and table configurations
+
+# API Connection Settings
+api:
+  base_url: "https://api.example.com/v1"
+  auth_type: "bearer"  # Options: bearer, api_key
+  auth_token_env_var: "API_AUTH_TOKEN"  # Environment variable containing the auth token
+  timeout_seconds: 30
+  max_retries: 3
+  retry_backoff_factor: 2.0
+  page_size: 1000
+
+# GCS Storage Settings (Bronze Layer)
+gcs:
+  project_id: "my-gcp-project"
+  bucket_name: "my-data-lake-bucket"
+  bronze_layer_prefix: "bronze"
+  partition_format: "ingestion_date={date}"
+  file_format: "parquet"  # Options: parquet, json, delta
+
+# Checkpoint Configuration
+checkpoint_table: "ingestion_checkpoints"
+
+# Logging Level
+log_level: "INFO"  # Options: DEBUG, INFO, WARNING, ERROR
+
+# Table Configurations
+tables:
+  # Transactional table with incremental support
+  - name: "customers"
+    endpoint: "/customers"
+    primary_key: "customer_id"
+    table_type: "transactional"
+    change_tracking_column: "updated_at"
+    pagination_type: "offset"
+    pagination_param: "offset"
+    page_size_param: "limit"
+    schema_fields:
+      - name: "customer_id"
+        type: "string"
+        nullable: false
+      - name: "email"
+        type: "string"
+        nullable: false
+      - name: "first_name"
+        type: "string"
+        nullable: true
+      - name: "last_name"
+        type: "string"
+        nullable: true
+      - name: "created_at"
+        type: "timestamp"
+        nullable: false
+      - name: "updated_at"
+        type: "timestamp"
+        nullable: false
+
+  # Transactional table - orders
+  - name: "orders"
+    endpoint: "/orders"
+    primary_key: "order_id"
+    table_type: "transactional"
+    change_tracking_column: "modified_date"
+    pagination_type: "cursor"
+    pagination_param: "cursor"
+    page_size_param: "page_size"
+    schema_fields:
+      - name: "order_id"
+        type: "string"
+        nullable: false
+      - name: "customer_id"
+        type: "string"
+        nullable: false
+      - name: "order_date"
+        type: "timestamp"
+        nullable: false
+      - name: "total_amount"
+        type: "double"
+        nullable: false
+      - name: "status"
+        type: "string"
+        nullable: false
+      - name: "modified_date"
+        type: "timestamp"
+        nullable: false
+
+  # Reference table - no change tracking, full snapshot
+  - name: "countries"
+    endpoint: "/reference/countries"
+    primary_key: "country_code"
+    table_type: "reference"
+    pagination_type: "page"
+    pagination_param: "page"
+    page_size_param: "per_page"
+    schema_fields:
+      - name: "country_code"
+        type: "string"
+        nullable: false
+      - name: "country_name"
+        type: "string"
+        nullable: false
+      - name: "region"
+        type: "string"
+        nullable: true
+
+  # Reference table - product categories
+  - name: "product_categories"
+    endpoint: "/reference/categories"
+    primary_key: "category_id"
+    table_type: "reference"
+    pagination_type: "offset"
+    pagination_param: "offset"
+    page_size_param: "limit"
+    schema_fields:
+      - name: "category_id"
+        type: "integer"
+        nullable: false
+      - name: "category_name"
+        type: "string"
+        nullable: false
+      - name: "parent_category_id"
+        type: "integer"
+        nullable: true
+      - name: "description"
+        type: "string"
+        nullable: true
