@@ -34,19 +34,20 @@ Ingest source data from REST API and load into GCP bucket (bronze layer, medalli
 experiment/rest-api-ingestion/
 ├── airflow/                    # Airflow DAGs and configs
 ├── analytique/
-│   └── msb_ingestion/         # Core package
-│       ├── api/
-│       │   └── client.py      # API interaction (fetch, pagination, retry)
-│       ├── storage/
-│       │   └── gcs_writer.py  # Write to GCS bucket
+│   ├── common/                # SHARED: Generic reusable modules
+│   │   ├── api/
+│   │   │   └── client.py      # Generic API client (any REST API)
+│   │   ├── storage/
+│   │   │   └── gcs_writer.py  # Generic GCS writer
+│   │   └── utils/
+│   │       ├── logger.py      # Logging setup
+│   │       └── helpers.py     # Common utilities
+│   └── msb_ingestion/         # PROJECT-SPECIFIC: This ingestion project
 │       ├── ingestion/
-│       │   ├── processor.py   # Transformations and business logic
-│       │   └── rules.py       # Ingestion rules (initial/incremental/backfill/reference)
-│       ├── config/
-│       │   └── settings.py    # Configuration management
-│       └── utils/
-│           ├── logger.py      # Logging setup
-│           └── helpers.py     # Common utilities
+│       │   ├── processor.py   # MSB-specific transformations
+│       │   └── rules.py       # MSB-specific ingestion rules
+│       └── config/
+│           └── settings.py    # MSB-specific configuration
 ├── main.py                     # Orchestrator (tells ingestion story)
 ├── tests/                      # Unit and integration tests
 ├── scripts-gcp/               # GCP resource creation scripts
@@ -67,18 +68,20 @@ Example: `python main.py --table customers --mode incremental --start-date 2024-
 
 ## Main.py Flow (Story Structure)
 1. Parse CLI parameters
-2. Initialize logger
-3. Load configuration
+2. Initialize logger (from common.utils)
+3. Load configuration (project-specific)
 4. Determine tables to process (single or all)
 5. For each table:
-   - Identify table type (transactional vs reference)
-   - Fetch source data from API
-   - Determine ingestion mode
-   - Transform and validate data
-   - Write to GCS bronze layer
+   - Fetch data using generic API client (common.api.client)
+   - Determine ingestion mode (project-specific rules)
+   - Transform and validate data (project-specific processor)
+   - Write to GCS using generic writer (common.storage.gcs_writer)
 6. Log completion summary
 
 ## Design Principles
+- **Separation**: Generic components in `common/`, project-specific in `msb_ingestion/`
+- **Reusability**: API client and storage modules usable across all ingestion projects
+- **Extensibility**: New ingestion projects add their own folder under `analytique/`
 - Medallion architecture (bronze layer focus)
 - Partition by ingestion date
 - Idempotency via unique identifiers and timestamps
