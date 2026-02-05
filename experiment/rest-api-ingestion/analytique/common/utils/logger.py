@@ -1,7 +1,8 @@
-"""Logging setup for REST API ingestion pipeline.
+"""Generic logging setup for data ingestion pipelines.
 
 Provides structured logging with configurable levels and formats suitable
-for both local development and GCP Dataproc execution.
+for both local development and GCP Dataproc execution. Can be used across
+all ingestion projects.
 """
 
 import logging
@@ -10,13 +11,13 @@ from datetime import datetime
 from typing import Optional
 
 
-class IngestionLogger:
-    """Custom logger for the ingestion pipeline."""
+class PipelineLogger:
+    """Generic logger for data pipelines."""
 
-    _instance: Optional["IngestionLogger"] = None
+    _instance: Optional["PipelineLogger"] = None
     _logger: Optional[logging.Logger] = None
 
-    def __new__(cls) -> "IngestionLogger":
+    def __new__(cls) -> "PipelineLogger":
         """Singleton pattern to ensure single logger instance."""
         if cls._instance is None:
             cls._instance = super().__new__(cls)
@@ -24,7 +25,7 @@ class IngestionLogger:
 
     def setup(
         self,
-        name: str = "msb_ingestion",
+        name: str = "data_pipeline",
         level: str = "INFO",
         log_format: Optional[str] = None,
     ) -> logging.Logger:
@@ -72,7 +73,7 @@ class IngestionLogger:
 
 
 def get_logger(
-    name: str = "msb_ingestion",
+    name: str = "data_pipeline",
     level: str = "INFO",
 ) -> logging.Logger:
     """Convenience function to get a configured logger.
@@ -84,99 +85,85 @@ def get_logger(
     Returns:
         Configured logger instance.
     """
-    logger_instance = IngestionLogger()
+    logger_instance = PipelineLogger()
     return logger_instance.setup(name=name, level=level)
 
 
-class IngestionMetrics:
-    """Tracks and logs ingestion metrics for a single run."""
+class PipelineMetrics:
+    """Generic metrics tracker for data pipelines."""
 
-    def __init__(self, table_name: str, mode: str):
+    def __init__(self, job_name: str, operation: str):
         """Initialize metrics tracking.
 
         Args:
-            table_name: Name of the table being processed.
-            mode: Ingestion mode (initial, incremental, backfill, reference).
+            job_name: Name of the job/table being processed.
+            operation: Operation type (e.g., 'ingestion', 'transformation').
         """
-        self.table_name = table_name
-        self.mode = mode
+        self.job_name = job_name
+        self.operation = operation
         self.start_time: Optional[datetime] = None
         self.end_time: Optional[datetime] = None
-        self.records_fetched: int = 0
-        self.records_written: int = 0
-        self.pages_processed: int = 0
+        self.records_in: int = 0
+        self.records_out: int = 0
+        self.batches_processed: int = 0
         self.errors: list[str] = []
         self._logger = get_logger()
 
     def start(self) -> None:
-        """Mark the start of ingestion."""
+        """Mark the start of processing."""
         self.start_time = datetime.utcnow()
-        self._logger.info(
-            f"Starting {self.mode} ingestion for table '{self.table_name}'"
-        )
+        self._logger.info(f"Starting {self.operation} for '{self.job_name}'")
 
     def end(self) -> None:
-        """Mark the end of ingestion and log summary."""
+        """Mark the end of processing and log summary."""
         self.end_time = datetime.utcnow()
         duration = (self.end_time - self.start_time).total_seconds() if self.start_time else 0
 
         self._logger.info(
-            f"Completed {self.mode} ingestion for table '{self.table_name}' | "
+            f"Completed {self.operation} for '{self.job_name}' | "
             f"Duration: {duration:.2f}s | "
-            f"Records fetched: {self.records_fetched} | "
-            f"Records written: {self.records_written} | "
-            f"Pages: {self.pages_processed} | "
+            f"Records in: {self.records_in} | "
+            f"Records out: {self.records_out} | "
+            f"Batches: {self.batches_processed} | "
             f"Errors: {len(self.errors)}"
         )
 
-    def add_records_fetched(self, count: int) -> None:
-        """Add to the count of fetched records.
+    def add_records_in(self, count: int) -> None:
+        """Add to the count of input records."""
+        self.records_in += count
 
-        Args:
-            count: Number of records fetched.
-        """
-        self.records_fetched += count
+    def add_records_out(self, count: int) -> None:
+        """Add to the count of output records."""
+        self.records_out += count
 
-    def add_records_written(self, count: int) -> None:
-        """Add to the count of written records.
-
-        Args:
-            count: Number of records written.
-        """
-        self.records_written += count
-
-    def increment_pages(self) -> None:
-        """Increment the page counter."""
-        self.pages_processed += 1
+    def increment_batches(self) -> None:
+        """Increment the batch counter."""
+        self.batches_processed += 1
 
     def add_error(self, error_message: str) -> None:
-        """Record an error.
-
-        Args:
-            error_message: Description of the error.
-        """
+        """Record an error."""
         self.errors.append(error_message)
-        self._logger.error(f"Error in {self.table_name}: {error_message}")
+        self._logger.error(f"Error in {self.job_name}: {error_message}")
 
     def get_summary(self) -> dict:
-        """Get metrics summary as a dictionary.
-
-        Returns:
-            Dictionary containing all metrics.
-        """
+        """Get metrics summary as a dictionary."""
         duration = None
         if self.start_time and self.end_time:
             duration = (self.end_time - self.start_time).total_seconds()
 
         return {
-            "table_name": self.table_name,
-            "mode": self.mode,
+            "job_name": self.job_name,
+            "operation": self.operation,
             "start_time": self.start_time.isoformat() if self.start_time else None,
             "end_time": self.end_time.isoformat() if self.end_time else None,
             "duration_seconds": duration,
-            "records_fetched": self.records_fetched,
-            "records_written": self.records_written,
-            "pages_processed": self.pages_processed,
+            "records_in": self.records_in,
+            "records_out": self.records_out,
+            "batches_processed": self.batches_processed,
             "error_count": len(self.errors),
             "errors": self.errors,
         }
+
+
+# Alias for backward compatibility
+IngestionMetrics = PipelineMetrics

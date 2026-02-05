@@ -1,7 +1,7 @@
-"""Ingestion rules for different load modes.
+"""MSB-specific ingestion rules for different load modes.
 
 Provides rule-based logic for initial, incremental, backfill,
-and reference table ingestion patterns.
+and reference table ingestion patterns for the MSB project.
 """
 
 from abc import ABC, abstractmethod
@@ -11,8 +11,8 @@ from typing import Any, Optional
 
 from pyspark.sql import DataFrame, SparkSession
 
+from analytique.common.utils.logger import get_logger
 from analytique.msb_ingestion.config.settings import TableConfig, GCSConfig
-from analytique.msb_ingestion.utils.logger import get_logger
 
 
 class IngestionMode(Enum):

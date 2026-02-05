@@ -3,7 +3,7 @@
 import pytest
 from datetime import datetime
 
-from analytique.msb_ingestion.utils.helpers import (
+from analytique.common.utils.helpers import (
     parse_date,
     format_date,
     get_date_range,

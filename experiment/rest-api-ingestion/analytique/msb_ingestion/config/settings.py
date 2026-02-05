@@ -1,6 +1,6 @@
-"""Configuration management for REST API ingestion.
+"""MSB-specific configuration management for REST API ingestion.
 
-This module provides configuration loading and validation for the ingestion pipeline.
+This module provides configuration loading and validation for the MSB ingestion pipeline.
 Supports YAML configuration files and environment variable overrides.
 """
 
@@ -11,10 +11,13 @@ from typing import Any, Optional
 
 import yaml
 
+from analytique.common.api.client import APIClientConfig
+from analytique.common.storage.gcs_writer import GCSWriterConfig
+
 
 @dataclass
 class APIConfig:
-    """API connection configuration."""
+    """MSB API connection configuration."""
 
     base_url: str
     auth_type: str = "bearer"
@@ -28,10 +31,22 @@ class APIConfig:
         """Retrieve authentication token from environment variable."""
         return os.environ.get(self.auth_token_env_var)
 
+    def to_client_config(self) -> APIClientConfig:
+        """Convert to generic APIClientConfig."""
+        return APIClientConfig(
+            base_url=self.base_url,
+            auth_type=self.auth_type,
+            auth_token=self.get_auth_token(),
+            timeout_seconds=self.timeout_seconds,
+            max_retries=self.max_retries,
+            retry_backoff_factor=self.retry_backoff_factor,
+            page_size=self.page_size,
+        )
+
 
 @dataclass
 class GCSConfig:
-    """GCS storage configuration."""
+    """MSB GCS storage configuration."""
 
     project_id: str
     bucket_name: str
@@ -39,10 +54,22 @@ class GCSConfig:
     partition_format: str = "ingestion_date={date}"
     file_format: str = "parquet"
 
+    def to_writer_config(self) -> GCSWriterConfig:
+        """Convert to generic GCSWriterConfig."""
+        return GCSWriterConfig(
+            bucket_name=self.bucket_name,
+            prefix=self.bronze_layer_prefix,
+            partition_format=self.partition_format,
+            file_format=self.file_format,
+        )
+
 
 @dataclass
 class TableConfig:
-    """Configuration for a single table."""
+    """MSB-specific configuration for a single table.
+
+    Implements the PaginationConfig protocol for use with generic API client.
+    """
 
     name: str
     endpoint: str

@@ -1,19 +1,18 @@
-"""REST API client for data ingestion.
+"""Generic REST API client for data ingestion.
 
-Provides functionality for fetching data from REST APIs with support for
-pagination, retry logic, and authentication.
+Provides reusable functionality for fetching data from REST APIs with support for
+pagination, retry logic, and authentication. Can be used across all ingestion projects.
 """
 
-import time
+from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Generator, Optional
+from typing import Any, Callable, Generator, Optional, Protocol
 
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
-from analytique.msb_ingestion.config.settings import APIConfig, TableConfig
-from analytique.msb_ingestion.utils.logger import get_logger
+from analytique.common.utils.logger import get_logger
 
 
 class APIClientError(Exception):
@@ -22,14 +21,37 @@ class APIClientError(Exception):
     pass
 
 
-class APIClient:
-    """REST API client with pagination and retry support."""
+@dataclass
+class APIClientConfig:
+    """Generic API client configuration."""
 
-    def __init__(self, config: APIConfig):
+    base_url: str
+    auth_type: str = "bearer"
+    auth_token: Optional[str] = None
+    timeout_seconds: int = 30
+    max_retries: int = 3
+    retry_backoff_factor: float = 2.0
+    page_size: int = 1000
+
+
+class PaginationConfig(Protocol):
+    """Protocol for pagination configuration."""
+
+    endpoint: str
+    pagination_type: str
+    pagination_param: str
+    page_size_param: str
+    change_tracking_column: Optional[str]
+
+
+class APIClient:
+    """Generic REST API client with pagination and retry support."""
+
+    def __init__(self, config: APIClientConfig):
         """Initialize the API client.
 
         Args:
-            config: API configuration settings.
+            config: API client configuration.
         """
         self.config = config
         self.logger = get_logger()
@@ -65,12 +87,11 @@ class APIClient:
         session.mount("http://", adapter)
         session.mount("https://", adapter)
 
-        auth_token = self.config.get_auth_token()
-        if auth_token:
+        if self.config.auth_token:
             if self.config.auth_type.lower() == "bearer":
-                session.headers.update({"Authorization": f"Bearer {auth_token}"})
+                session.headers.update({"Authorization": f"Bearer {self.config.auth_token}"})
             elif self.config.auth_type.lower() == "api_key":
-                session.headers.update({"X-API-Key": auth_token})
+                session.headers.update({"X-API-Key": self.config.auth_token})
 
         session.headers.update({
             "Content-Type": "application/json",
@@ -135,7 +156,7 @@ class APIClient:
 
     def fetch_with_pagination(
         self,
-        table_config: TableConfig,
+        pagination_config: PaginationConfig,
         start_date: Optional[datetime] = None,
         end_date: Optional[datetime] = None,
         watermark_value: Optional[Any] = None,
@@ -145,7 +166,7 @@ class APIClient:
         Yields batches of records as they are fetched from each page.
 
         Args:
-            table_config: Configuration for the table being fetched.
+            pagination_config: Configuration for pagination (endpoint, type, params).
             start_date: Start date for filtering (optional).
             end_date: End date for filtering (optional).
             watermark_value: Last known value for incremental loads (optional).
@@ -156,14 +177,14 @@ class APIClient:
         Raises:
             APIClientError: If fetching fails.
         """
-        endpoint = table_config.endpoint
+        endpoint = pagination_config.endpoint
         page_size = self.config.page_size
-        pagination_type = table_config.pagination_type
+        pagination_type = pagination_config.pagination_type
 
         if pagination_type == "offset":
             yield from self._fetch_with_offset_pagination(
                 endpoint=endpoint,
-                table_config=table_config,
+                pagination_config=pagination_config,
                 page_size=page_size,
                 start_date=start_date,
                 end_date=end_date,
@@ -172,7 +193,7 @@ class APIClient:
         elif pagination_type == "cursor":
             yield from self._fetch_with_cursor_pagination(
                 endpoint=endpoint,
-                table_config=table_config,
+                pagination_config=pagination_config,
                 page_size=page_size,
                 start_date=start_date,
                 end_date=end_date,
@@ -181,7 +202,7 @@ class APIClient:
         elif pagination_type == "page":
             yield from self._fetch_with_page_pagination(
                 endpoint=endpoint,
-                table_config=table_config,
+                pagination_config=pagination_config,
                 page_size=page_size,
                 start_date=start_date,
                 end_date=end_date,
@@ -226,38 +247,25 @@ class APIClient:
     def _fetch_with_offset_pagination(
         self,
         endpoint: str,
-        table_config: TableConfig,
+        pagination_config: PaginationConfig,
         page_size: int,
         start_date: Optional[datetime] = None,
         end_date: Optional[datetime] = None,
         watermark_value: Optional[Any] = None,
     ) -> Generator[list[dict[str, Any]], None, None]:
-        """Fetch data using offset-based pagination.
-
-        Args:
-            endpoint: API endpoint.
-            table_config: Table configuration.
-            page_size: Number of records per page.
-            start_date: Start date filter.
-            end_date: End date filter.
-            watermark_value: Watermark for incremental loads.
-
-        Yields:
-            List of records for each page.
-        """
+        """Fetch data using offset-based pagination."""
         offset = 0
         page_num = 0
 
         while True:
             params = self._build_date_params(
-                start_date, end_date, watermark_value, table_config.change_tracking_column
+                start_date, end_date, watermark_value, pagination_config.change_tracking_column
             )
-            params[table_config.pagination_param] = offset
-            params[table_config.page_size_param] = page_size
+            params[pagination_config.pagination_param] = offset
+            params[pagination_config.page_size_param] = page_size
 
             self.logger.info(f"Fetching page {page_num + 1} (offset={offset})")
             response = self.fetch(endpoint, params)
-
             records = self._extract_records(response)
 
             if not records:
@@ -276,40 +284,27 @@ class APIClient:
     def _fetch_with_cursor_pagination(
         self,
         endpoint: str,
-        table_config: TableConfig,
+        pagination_config: PaginationConfig,
         page_size: int,
         start_date: Optional[datetime] = None,
         end_date: Optional[datetime] = None,
         watermark_value: Optional[Any] = None,
     ) -> Generator[list[dict[str, Any]], None, None]:
-        """Fetch data using cursor-based pagination.
-
-        Args:
-            endpoint: API endpoint.
-            table_config: Table configuration.
-            page_size: Number of records per page.
-            start_date: Start date filter.
-            end_date: End date filter.
-            watermark_value: Watermark for incremental loads.
-
-        Yields:
-            List of records for each page.
-        """
+        """Fetch data using cursor-based pagination."""
         cursor: Optional[str] = None
         page_num = 0
 
         while True:
             params = self._build_date_params(
-                start_date, end_date, watermark_value, table_config.change_tracking_column
+                start_date, end_date, watermark_value, pagination_config.change_tracking_column
             )
-            params[table_config.page_size_param] = page_size
+            params[pagination_config.page_size_param] = page_size
 
             if cursor:
                 params["cursor"] = cursor
 
             self.logger.info(f"Fetching page {page_num + 1} (cursor={cursor})")
             response = self.fetch(endpoint, params)
-
             records = self._extract_records(response)
 
             if not records:
@@ -328,37 +323,24 @@ class APIClient:
     def _fetch_with_page_pagination(
         self,
         endpoint: str,
-        table_config: TableConfig,
+        pagination_config: PaginationConfig,
         page_size: int,
         start_date: Optional[datetime] = None,
         end_date: Optional[datetime] = None,
         watermark_value: Optional[Any] = None,
     ) -> Generator[list[dict[str, Any]], None, None]:
-        """Fetch data using page number-based pagination.
-
-        Args:
-            endpoint: API endpoint.
-            table_config: Table configuration.
-            page_size: Number of records per page.
-            start_date: Start date filter.
-            end_date: End date filter.
-            watermark_value: Watermark for incremental loads.
-
-        Yields:
-            List of records for each page.
-        """
+        """Fetch data using page number-based pagination."""
         page_num = 1
 
         while True:
             params = self._build_date_params(
-                start_date, end_date, watermark_value, table_config.change_tracking_column
+                start_date, end_date, watermark_value, pagination_config.change_tracking_column
             )
             params["page"] = page_num
-            params[table_config.page_size_param] = page_size
+            params[pagination_config.page_size_param] = page_size
 
             self.logger.info(f"Fetching page {page_num}")
             response = self.fetch(endpoint, params)
-
             records = self._extract_records(response)
 
             if not records:

@@ -10,6 +10,7 @@ A PySpark-based data ingestion pipeline for loading data from REST APIs into GCS
 - **Schema validation**: Configurable schema enforcement
 - **Checkpoint management**: Watermark-based incremental loading
 - **Error handling**: Comprehensive logging and error recovery
+- **Modular architecture**: Generic reusable components + project-specific modules
 
 ## Project Structure
 
@@ -17,19 +18,20 @@ A PySpark-based data ingestion pipeline for loading data from REST APIs into GCS
 experiment/rest-api-ingestion/
 ├── airflow/                    # Airflow DAGs and configs
 ├── analytique/
-│   └── msb_ingestion/         # Core package
-│       ├── api/
-│       │   └── client.py      # API interaction (fetch, pagination, retry)
-│       ├── storage/
-│       │   └── gcs_writer.py  # Write to GCS bucket
+│   ├── common/                # SHARED: Generic reusable modules
+│   │   ├── api/
+│   │   │   └── client.py      # Generic API client (any REST API)
+│   │   ├── storage/
+│   │   │   └── gcs_writer.py  # Generic GCS writer
+│   │   └── utils/
+│   │       ├── logger.py      # Logging setup
+│   │       └── helpers.py     # Common utilities
+│   └── msb_ingestion/         # PROJECT-SPECIFIC: MSB ingestion project
 │       ├── ingestion/
-│       │   ├── processor.py   # Transformations and business logic
-│       │   └── rules.py       # Ingestion rules
-│       ├── config/
-│       │   └── settings.py    # Configuration management
-│       └── utils/
-│           ├── logger.py      # Logging setup
-│           └── helpers.py     # Common utilities
+│       │   ├── processor.py   # MSB-specific transformations
+│       │   └── rules.py       # MSB-specific ingestion rules
+│       └── config/
+│           └── settings.py    # MSB-specific configuration
 ├── config/
 │   └── ingestion_config.yaml  # Sample configuration
 ├── main.py                     # Orchestrator
@@ -37,6 +39,22 @@ experiment/rest-api-ingestion/
 ├── pyproject.toml
 └── README.md
 ```
+
+## Architecture
+
+### Module Separation
+
+- **`analytique/common/`**: Generic, reusable modules that can be used across all ingestion projects
+  - API client with pagination support
+  - GCS writer with partitioning
+  - Logging and helper utilities
+
+- **`analytique/msb_ingestion/`**: Project-specific modules for the MSB ingestion
+  - Configuration settings specific to MSB
+  - Data processor with MSB-specific transformations
+  - Ingestion rules for different load modes
+
+This separation allows new ingestion projects to reuse the common components while implementing their own project-specific logic.
 
 ## Installation
 
@@ -93,25 +111,23 @@ See `config/ingestion_config.yaml` for a complete example. Key sections:
 pytest tests/ -v
 ```
 
-## Architecture
-
-### Ingestion Modes
+## Ingestion Modes
 
 1. **Initial**: Full load of all data, overwrites existing
 2. **Incremental**: Uses watermarks to load only changed records
 3. **Backfill**: Reloads data for specific date ranges
 4. **Reference**: Full snapshot for dimension tables without change tracking
 
-### Data Flow
+## Data Flow
 
 1. Parse CLI parameters
-2. Load configuration
-3. Initialize Spark session
+2. Initialize logger (from common.utils)
+3. Load configuration (project-specific)
 4. For each table:
-   - Apply ingestion rule
-   - Fetch data from API with pagination
-   - Transform and validate
-   - Write to GCS bronze layer
+   - Fetch data using generic API client (common.api.client)
+   - Apply ingestion rules (project-specific)
+   - Transform and validate (project-specific processor)
+   - Write to GCS using generic writer (common.storage.gcs_writer)
    - Update checkpoints
 
 ## License

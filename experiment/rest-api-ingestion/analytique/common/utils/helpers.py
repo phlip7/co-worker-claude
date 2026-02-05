@@ -1,7 +1,8 @@
-"""Common utility functions for REST API ingestion pipeline.
+"""Common utility functions for data pipelines.
 
-Provides helper functions for date handling, data validation,
-and other common operations.
+Provides reusable helper functions for date handling, data validation,
+schema operations, and other common operations. Can be used across all
+ingestion projects.
 """
 
 from datetime import datetime, timedelta
@@ -9,7 +10,17 @@ from typing import Any, Optional
 
 from pyspark.sql import DataFrame
 from pyspark.sql import functions as F
-from pyspark.sql.types import StructType, StructField, StringType, IntegerType, LongType, DoubleType, BooleanType, TimestampType, DateType
+from pyspark.sql.types import (
+    StructType,
+    StructField,
+    StringType,
+    IntegerType,
+    LongType,
+    DoubleType,
+    BooleanType,
+    TimestampType,
+    DateType,
+)
 
 
 def parse_date(date_str: str, date_format: str = "%Y-%m-%d") -> datetime:
@@ -90,19 +101,23 @@ def build_gcs_path(
     return f"gs://{bucket_name}/{prefix}/{table_name}/{partition}"
 
 
-def generate_unique_id(table_name: str, primary_key_value: Any, timestamp: datetime) -> str:
+def generate_unique_id(
+    namespace: str,
+    primary_key_value: Any,
+    timestamp: Optional[datetime] = None,
+) -> str:
     """Generate a unique identifier for idempotency.
 
     Args:
-        table_name: Name of the table.
+        namespace: Namespace for the ID (e.g., table name).
         primary_key_value: Value of the primary key.
-        timestamp: Timestamp of the record.
+        timestamp: Optional timestamp of the record.
 
     Returns:
         Unique identifier string.
     """
     ts_str = timestamp.strftime("%Y%m%d%H%M%S") if timestamp else "none"
-    return f"{table_name}_{primary_key_value}_{ts_str}"
+    return f"{namespace}_{primary_key_value}_{ts_str}"
 
 
 def map_json_type_to_spark(json_type: str) -> Any:
@@ -146,24 +161,32 @@ def build_spark_schema(schema_fields: list[dict[str, Any]]) -> StructType:
     return StructType(fields)
 
 
-def add_ingestion_metadata(df: DataFrame, ingestion_date: datetime, mode: str) -> DataFrame:
-    """Add standard ingestion metadata columns to a DataFrame.
+def add_metadata_columns(
+    df: DataFrame,
+    ingestion_date: datetime,
+    metadata: Optional[dict[str, Any]] = None,
+) -> DataFrame:
+    """Add standard metadata columns to a DataFrame.
 
     Args:
         df: Input DataFrame.
         ingestion_date: Date of ingestion.
-        mode: Ingestion mode (initial, incremental, backfill, reference).
+        metadata: Optional additional metadata as key-value pairs.
 
     Returns:
         DataFrame with added metadata columns.
     """
-    return df.withColumn(
+    df = df.withColumn(
         "_ingestion_timestamp", F.lit(datetime.utcnow())
     ).withColumn(
         "_ingestion_date", F.lit(format_date(ingestion_date))
-    ).withColumn(
-        "_ingestion_mode", F.lit(mode)
     )
+
+    if metadata:
+        for key, value in metadata.items():
+            df = df.withColumn(f"_{key}", F.lit(value))
+
+    return df
 
 
 def chunk_list(lst: list, chunk_size: int) -> list[list]:
@@ -230,3 +253,28 @@ def sanitize_column_name(name: str) -> str:
     sanitized = sanitized.replace("-", "_")
     sanitized = "".join(c if c.isalnum() or c == "_" else "" for c in sanitized)
     return sanitized
+
+
+def flatten_dict(
+    data: dict,
+    parent_key: str = "",
+    separator: str = "_",
+) -> dict:
+    """Flatten a nested dictionary.
+
+    Args:
+        data: Nested dictionary to flatten.
+        parent_key: Parent key prefix.
+        separator: Separator between nested keys.
+
+    Returns:
+        Flattened dictionary.
+    """
+    items: list[tuple[str, Any]] = []
+    for key, value in data.items():
+        new_key = f"{parent_key}{separator}{key}" if parent_key else key
+        if isinstance(value, dict):
+            items.extend(flatten_dict(value, new_key, separator).items())
+        else:
+            items.append((new_key, value))
+    return dict(items)

@@ -1,6 +1,6 @@
-"""Data processor for REST API ingestion.
+"""MSB-specific data processor for REST API ingestion.
 
-Handles data transformation, validation, and schema enforcement
+Handles MSB-specific data transformation, validation, and schema enforcement
 for the ingestion pipeline.
 """
 
@@ -11,13 +11,13 @@ from pyspark.sql import DataFrame, SparkSession
 from pyspark.sql import functions as F
 from pyspark.sql.types import StructType
 
-from analytique.msb_ingestion.config.settings import TableConfig
-from analytique.msb_ingestion.utils.helpers import (
-    add_ingestion_metadata,
+from analytique.common.utils.helpers import (
+    add_metadata_columns,
     build_spark_schema,
     sanitize_column_name,
 )
-from analytique.msb_ingestion.utils.logger import get_logger
+from analytique.common.utils.logger import get_logger
+from analytique.msb_ingestion.config.settings import TableConfig
 
 
 class ProcessorError(Exception):
@@ -74,7 +74,7 @@ class DataProcessor:
 
             df = self._validate_data(df, table_config)
 
-            df = add_ingestion_metadata(df, ingestion_date, mode)
+            df = add_metadata_columns(df, ingestion_date, {"ingestion_mode": mode})
 
             self.logger.info(f"Successfully processed {df.count()} records")
             return df

@@ -17,13 +17,16 @@ from typing import Optional
 
 from pyspark.sql import SparkSession
 
-from analytique.msb_ingestion.api.client import APIClient, APIClientError
+# Import from common (generic, reusable modules)
+from analytique.common.api.client import APIClient, APIClientError
+from analytique.common.storage.gcs_writer import GCSWriter, GCSWriterError
+from analytique.common.utils.logger import get_logger, PipelineMetrics
+from analytique.common.utils.helpers import parse_date
+
+# Import from msb_ingestion (project-specific modules)
 from analytique.msb_ingestion.config.settings import Settings, TableConfig
 from analytique.msb_ingestion.ingestion.processor import DataProcessor, ProcessorError
 from analytique.msb_ingestion.ingestion.rules import RuleFactory, IngestionRule
-from analytique.msb_ingestion.storage.gcs_writer import GCSWriter, GCSWriterError
-from analytique.msb_ingestion.utils.logger import get_logger, IngestionMetrics
-from analytique.msb_ingestion.utils.helpers import parse_date
 
 
 def parse_arguments() -> argparse.Namespace:
@@ -130,7 +133,7 @@ def process_table(
     start_date: Optional[datetime],
     end_date: Optional[datetime],
     mode: str,
-) -> IngestionMetrics:
+) -> PipelineMetrics:
     """Process a single table through the ingestion pipeline.
 
     Args:
@@ -145,10 +148,10 @@ def process_table(
         mode: Ingestion mode.
 
     Returns:
-        IngestionMetrics with processing statistics.
+        PipelineMetrics with processing statistics.
     """
     logger = get_logger()
-    metrics = IngestionMetrics(table_config.name, mode)
+    metrics = PipelineMetrics(table_config.name, mode)
     metrics.start()
 
     try:
@@ -162,14 +165,15 @@ def process_table(
 
         all_dataframes = []
 
+        # Use generic API client with TableConfig (implements PaginationConfig protocol)
         for batch_records in api_client.fetch_with_pagination(
-            table_config=table_config,
+            pagination_config=table_config,
             start_date=start_date,
             end_date=end_date,
             watermark_value=watermark,
         ):
-            metrics.increment_pages()
-            metrics.add_records_fetched(len(batch_records))
+            metrics.increment_batches()
+            metrics.add_records_in(len(batch_records))
 
             df = processor.process(
                 records=batch_records,
@@ -194,13 +198,14 @@ def process_table(
             return metrics
 
         write_mode = rule.get_write_mode()
+        # Use generic GCS writer with table name
         written_count = gcs_writer.write(
             df=final_df,
-            table_config=table_config,
+            table_name=table_config.name,
             ingestion_date=ingestion_date,
             mode=write_mode,
         )
-        metrics.add_records_written(written_count)
+        metrics.add_records_out(written_count)
 
         new_watermark = processor.get_max_watermark(final_df, table_config)
         if new_watermark:
@@ -228,8 +233,10 @@ def main() -> int:
     """
     args = parse_arguments()
 
+    # Load project-specific configuration
     settings = Settings.from_yaml(args.config_path)
 
+    # Initialize logger from common utils
     logger = get_logger(level=settings.log_level)
     logger.info("=" * 60)
     logger.info("REST API Ingestion Pipeline Started")
@@ -248,6 +255,7 @@ def main() -> int:
     spark = create_spark_session()
 
     try:
+        # Create project-specific rule factory
         rule_factory = RuleFactory(
             spark=spark,
             gcs_config=settings.gcs,
@@ -265,9 +273,11 @@ def main() -> int:
             logger.warning("No tables to process")
             return 0
 
-        api_client = APIClient(settings.api)
+        # Initialize generic API client with converted config
+        api_client = APIClient(settings.api.to_client_config())
         processor = DataProcessor(spark)
-        gcs_writer = GCSWriter(settings.gcs, spark)
+        # Initialize generic GCS writer with converted config
+        gcs_writer = GCSWriter(settings.gcs.to_writer_config(), spark)
 
         all_metrics = []
         failed_tables = []
@@ -301,8 +311,8 @@ def main() -> int:
         logger.info("Ingestion Summary")
         logger.info("=" * 60)
 
-        total_fetched = sum(m.records_fetched for m in all_metrics)
-        total_written = sum(m.records_written for m in all_metrics)
+        total_fetched = sum(m.records_in for m in all_metrics)
+        total_written = sum(m.records_out for m in all_metrics)
         total_errors = sum(len(m.errors) for m in all_metrics)
 
         logger.info(f"Tables processed: {len(tables)}")

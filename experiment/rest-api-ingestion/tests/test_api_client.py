@@ -3,8 +3,8 @@
 import pytest
 from unittest.mock import Mock, patch, MagicMock
 
-from analytique.msb_ingestion.api.client import APIClient, APIClientError
-from analytique.msb_ingestion.config.settings import APIConfig, TableConfig
+from analytique.common.api.client import APIClient, APIClientError, APIClientConfig
+from analytique.msb_ingestion.config.settings import TableConfig
 
 
 class TestAPIClient:
@@ -12,7 +12,7 @@ class TestAPIClient:
 
     @pytest.fixture
     def api_config(self):
-        return APIConfig(
+        return APIClientConfig(
             base_url="https://api.example.com",
             timeout_seconds=30,
             max_retries=3,
@@ -43,7 +43,7 @@ class TestAPIClient:
         assert url == "https://api.example.com/api/customers"
 
     def test_build_url_trailing_slash_in_base(self):
-        config = APIConfig(base_url="https://api.example.com/")
+        config = APIClientConfig(base_url="https://api.example.com/")
         client = APIClient(config)
         url = client._build_url("/api/customers")
         assert url == "https://api.example.com/api/customers"
